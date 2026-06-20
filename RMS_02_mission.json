@@ -1,0 +1,29 @@
+{
+  "priority": "128",
+  "sub_missions": [
+    {
+      "space": "A-01-2",
+      "action": "start"
+    },
+    {
+      "space": "A-01-2",
+      "action": "load"
+    },
+    {
+      "space": "L-01-0",
+      "action": "unload"
+    },
+    {
+      "space": "GL-02-0",
+      "action": "load"
+    },
+    {
+      "space": "GL-02-0",
+      "action": "unload"
+    },
+    {
+      "space": "GL-02-0",
+      "action": "end"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "rms": {
+    "host": "192.168.168.63",
+    "port": 31111,
+    "log_file": "rms_simulator.log"
+  },
+  "wcs": {
+    "host": "localhost",
+    "port": 31112,
+    "log_file": "wcs_simulator.log"
+  },
+  "simulation": {
+    "step_delay_seconds": 10.0,
+    "ack_delay_seconds": 10.0,
+    "default_pallet_id": "01",
+    "request_timeout_seconds": 10.0,
+    "ack_timeout_seconds": 300.0
+  }
+}

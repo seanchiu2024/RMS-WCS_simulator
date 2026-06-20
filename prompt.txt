@@ -1,0 +1,8 @@
+
+
+===== RMS simulation ===================
+參考 C:\Sean_Documents\RMS_simulation_for_WCS\RMS_point_A_to_Point_B_v1.md
+開發一組 pyhton 程式， 模擬 RMS 行為
+接收來自 WCS set_mission_request API 後， reply 對應的 JSON 並紀錄相關log
+並於收到 WCS ack 後， 10 秒後，回覆任務執行結果 result 等相關欄位, 也就是 call /awd/rms/set_mission_result API
+之後繼續等待下一個 WCS 的ack 回覆，再繼續執行下一步 sub-mission 
