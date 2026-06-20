@@ -2,44 +2,53 @@
 
 本專案實作了一套 AMR 搬運任務控制流程模擬器，用以模擬 RMS (Robot Management System) 與 WCS (Warehouse Control System) 之間的 API 互動。
 
-系統遵循**「Request（請求） - Result（執行結果） - Ack（步驟確認）」**三階段互動原則，並內建步驟之間的延遲等待機制。
+系統遵循**「Request（請求） - Result（執行結果） - Ack（步驟確認）」**三階段互動原則，並支援多任務併發、車輛資源調配與任務排隊、互動式確認等進階控制。
 
 ---
 
 ## 運作邏輯
 
-任務流程以 AMR 從 `A-01-2` 搬運貨物至 `L-01-0` 為例，共分為 4 個主要子任務 (sub-missions)：`start` ➜ `load` ➜ `unload` ➜ `end`。
+任務流程以 AMR 搬運貨物為例，子任務包含 `start`、`load`、`idle`、`unload`、`end` 等。
 
-### 互動流程圖
+### 1. WCS 互動確認與多指令下發
+- **非阻塞 CLI 控制台**：WCS 使用獨立背景執行緒讀取 Stdin，不會因等待 RMS 網路包而阻塞控制台。
+- **互動式 ACK 詢問**：當 WCS 收到來自 RMS 的子任務執行結果 (`set_mission_result`) 時，系統會**暫停並進入互動確認模式**，於控制台詢問：
+  `是否針對任務 {seq} 動作 {action} (位置: {space}) 回覆 ACK? (y/n): `
+  - 輸入 `y` 或 `yes`：WCS 發送 ACK 給 RMS，允許車輛繼續下一步。
+  - 輸入 `n` 或 `no`：WCS 拒絕發送 ACK，暫停任務推進。**拒絕後系統每隔 5 秒會重新詢問一次，若自首次拒絕起 30 秒內仍未獲得 `y` 的確認，將會自動回覆該步驟的 ACK**，以防任務永久卡死。
+- **支援自訂 JSON 檔案與序號**：發送指令時支援指定不同的任務 JSON 設定檔與任務序號。
 
-```mermaid
-sequenceDiagram
-    autonumber
-    WCS->>RMS (Port 31111): POST /awd/rms/set_mission_request
-    Note over RMS: 解析任務並初始化背景狀態機
-    RMS-->>WCS: HTTP 200 OK (含 ACK 回覆 JSON)
+### 2. RMS 多任務與 2 台車限制
+- **車輛資源限制**：系統限制可用車輛為 2 台（`AMR01`、`AMR02`），支援最多兩個任務併發執行。
+- **任務排隊機制 (Queueing)**：當收到新搬運請求時，若車輛皆在忙碌中，RMS 會立即同步回覆 `ACK`（代表成功接收任務），並將任務放入等待佇列中排隊。
+- **自動資源釋放與佇列觸發**：當任務正常結束或異常中斷時，車輛資源會確實釋放，系統會**自動從排隊等待佇列中取出最舊的任務指派給空閒車輛**並開始執行。
 
-    rect rgb(240, 248, 255)
-        Note over RMS, WCS: 循環執行每一個子任務步驟 (start, load, unload, end)
-        RMS->>WCS (Port 31112): POST /awd/rms/set_mission_result
-        WCS-->>RMS: HTTP 200 OK (收到回報)
-        WCS->>RMS (Port 31111): POST /awd/rms/set_mission_ack
-        RMS-->>WCS: HTTP 200 OK (確認 Ack 配對成功)
-        Note over RMS: 收到 Ack 後，狀態機等待 10 秒再發送下一個步驟
-    end
-    Note over RMS: 所有步驟執行完畢，任務結案
+---
+
+## 配置文件說明 (`config.json`)
+
+```json
+{
+  "rms": {
+    "host": "localhost",
+    "port": 31111,
+    "log_file": "rms_simulator.log"
+  },
+  "wcs": {
+    "host": "localhost",
+    "port": 31112,
+    "log_file": "wcs_simulator.log"
+  },
+  "simulation": {
+    "step_delay_seconds": 10.0,
+    "ack_delay_seconds": 10.0,
+    "default_pallet_id": "01",
+    "request_timeout_seconds": 10.0,
+    "ack_timeout_seconds": 300.0
+  }
+}
 ```
-
-### 狀態機細節
-
-1. **任務觸發**：WCS 發送任務請求後，RMS 立即回覆包含 `ACK` 的 JSON，並啟動背景執行緒狀態機。
-2. **結果回報 (`set_mission_result`)**：
-   - RMS 主動呼叫 WCS 的結果接收端點。
-   - 子任務為 `load` 時，`reason` 欄位會攜帶棧板 ID `"01"`。其餘步驟 `reason` 皆為 `"NA"`。
-3. **確認接收 (`set_mission_ack`)**：
-   - WCS 收到結果後，非同步發送確認 (Ack) 給 RMS 的確認端點。
-   - RMS 比對 `sequence` 與 `action`，成功配對則觸發信號。
-4. **10秒延遲機制**：RMS 收到 Ack 信號後，**等待 10 秒**，隨後才發送下一個子任務的結果。
+* **本機調試建議**：將 `rms.host` 與 `wcs.host` 設定為 `"localhost"` 以便於在本機環境運行與測試。
 
 ---
 
@@ -47,12 +56,13 @@ sequenceDiagram
 
 ### 1. RMS 伺服器 (預設 Port: `31111`)
 
-- **`POST /awd/rms/set_mission_request`**：接收 WCS 任務指派。
+- **`POST /awd/rms/set_mission_request`**：接收 WCS 任務指派，若無重複序號則將其排隊或指派車輛。
 - **`POST /awd/rms/set_mission_ack`**：接收 WCS 對目前子任務步驟的確認訊號。
 
 ### 2. WCS 伺服器 (預設 Port: `31112`)
 
 - **`POST /awd/rms/set_mission_result`**：接收 RMS 回報之子任務執行結果。
+- **`POST /awd/rms/online`**：接收 RMS 上線狀態報告。
 
 ---
 
@@ -68,8 +78,6 @@ sequenceDiagram
 python rms_simulator.py
 ```
 
-*(可用參數：`--port` 指定監聽 Port，`--wcs-port` 指定要連線的 WCS Port)*
-
 ### 步驟 2: 啟動 WCS 模擬器
 
 開啟第二個終端機，執行：
@@ -78,21 +86,28 @@ python rms_simulator.py
 python wcs_simulator.py
 ```
 
-*(可用參數：`--port` 指定監聽 Port，`--rms-port` 指定要連線的 RMS Port)*
+### 步驟 3: 觸發與操控測試任務
 
-### 步驟 3: 觸發測試任務
+在 WCS 模擬器的控制台畫面中，將顯示命令列提示符 `WCS> `，支援以下指令：
 
-在 WCS 模擬器的控制台畫面中，將顯示命令列提示符 `WCS> `：
+- **`send`**：使用隨機產生序號與預設 `mission.json` 發送任務。
+- **`send <自訂序號>`** (例如 `send M20260620`)：使用自訂序號與預設 `mission.json` 發送任務。
+- **`send <JSON檔名>`** (例如 `send RMS_02_mission.json`)：使用自訂 JSON 設定檔與隨機產生的序號發送任務。
+- **`send <自訂序號> <JSON檔名>`** (例如 `send M9999 RMS_02_mission.json`)：使用指定的序號與指定的 JSON 設定檔發送任務。
+- **`exit`**：退出程式。
 
-- 輸入 **`send`** 並按 Enter：開始發送預設的測試任務 `M1000001`。
-- 輸入 **`send <自訂任務序號>`** (例如 `send M2026`)：發送自訂序號的測試任務。
-- 輸入 **`exit`**：退出程式。
+#### 任務控制流程：
+1. 當發送任務後，RMS 會分派車輛或將其排隊。
+2. 執行中的任務在到達各個步驟時，會向 WCS 回報結果。
+3. WCS 畫面上會出現：`是否針對任務 {seq} 動作 {action} (位置: {space}) 回覆 ACK? (y/n): `
+4. 輸入 **`y`** 傳送確認，任務會繼續前往下一個步驟（等待 10 秒）；輸入 **`n`** 拒絕發送確認，系統將每 5 秒重新詢問，若 30 秒內未回覆 y 則會自動發送 ACK 推進流程。
+5. 任務全部完成後，RMS 釋放車輛資源，若等待佇列中有排隊的任務，會自動啟動執行。
 
 ---
 
 ## 日誌紀錄說明
 
-每次 API 呼叫的接收與發送皆會詳實紀錄於日誌中，包含：**接收時間（當地時區）、請求 URL、Method、以及 JSON Body 內容**。
+每次 API 呼叫的接收與發送皆會詳實紀錄於日誌中：
 
 * **RMS 日誌**：儲存於 `rms_simulator.log` 並輸出至 Console。
 * **WCS 日誌**：儲存於 `wcs_simulator.log` 並輸出至 Console。

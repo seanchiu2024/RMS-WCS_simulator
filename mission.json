@@ -5,9 +5,6 @@
     { "space": "Repeat-A-0", "action": "load"},   
     { "space": "Repeat-B-0", "action": "idle"},   
     { "space": "GD-01-0", "action": "unload"},   
-    { "space": "Repeat-B-0", "action": "idle"},   
-    { "space": "GD-01-0", "action": "load"},   
-    { "space": "Repeat-C-0", "action": "unload"}, 
     { "space": "L-01-0", "action": "idle"},     
     { "space": "L-01-0", "action": "end"}
     ]

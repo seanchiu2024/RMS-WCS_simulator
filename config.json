@@ -1,6 +1,6 @@
 {
   "rms": {
-    "host": "192.168.168.63",
+    "host": "localhost",
     "port": 31111,
     "log_file": "rms_simulator.log"
   },

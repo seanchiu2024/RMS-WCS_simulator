@@ -6,3 +6,14 @@
 接收來自 WCS set_mission_request API 後， reply 對應的 JSON 並紀錄相關log
 並於收到 WCS ack 後， 10 秒後，回覆任務執行結果 result 等相關欄位, 也就是 call /awd/rms/set_mission_result API
 之後繼續等待下一個 WCS 的ack 回覆，再繼續執行下一步 sub-mission 
+
+
+=========================================================
+強化 APP，使其支援以下功能
+
+WCS 可支援多指令下發， 多result 回收，並根據 resuslt 回復狀況，提交相關資訊，詢問是否回復 ack 以繼續 submissions
+
+
+RMS 要可以根據 車輛 數量限制，同時執行多 requests
+將可用 車輛 數量設為 2 台
+當 mission 結束後, 釋放相應 resources.

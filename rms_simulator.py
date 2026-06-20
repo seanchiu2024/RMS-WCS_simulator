@@ -74,113 +74,159 @@ class MissionManager:
     """任務狀態管理與執行狀態機"""
     def __init__(self, wcs_url):
         self.wcs_url = wcs_url
-        self.active_mission = None
-        self.active_thread = None
         self.lock = threading.Lock()
         
-        # 用於等待 WCS ACK 的同步信號與變數
-        self.ack_event = threading.Event()
-        self.expected_action = None
-        self.expected_sequence = None
-        self.ack_status = None
+        # 資源與排隊機制
+        self.available_vehicles = ["AMR01", "AMR02"]
+        self.pending_queue = []
+        self.active_missions = {}  # sequence -> context dict
 
     def start_mission(self, request_data):
+        seq = request_data.get("sequence", "UNKNOWN")
         with self.lock:
-            # 檢查是否有正在執行中的任務
-            if self.active_thread and self.active_thread.is_alive():
-                logging.warning("目前已有任務正在執行中，拒絕新的任務請求。")
-                return False, "Mission already in progress"
+            # 檢查是否有重複 sequence 在執行中或排隊中
+            if seq in self.active_missions or any(m.get("sequence") == seq for m in self.pending_queue):
+                logging.warning(f"任務 {seq} 已經在執行中或等待佇列中，拒絕重複的任務請求。")
+                return False, "Mission sequence already active or queued"
             
-            self.active_mission = request_data
-            self.ack_event.clear()
-            self.expected_action = None
-            self.expected_sequence = None
-            self.ack_status = None
+            # 加入排隊佇列
+            self.pending_queue.append(request_data)
+            logging.info(f"[任務排隊] 任務 {seq} 已成功接收並加入等待佇列。目前排隊數量: {len(self.pending_queue)}")
             
-            # 啟動狀態機執行緒
-            self.active_thread = threading.Thread(target=self._run_mission, daemon=True)
-            self.active_thread.start()
+            # 嘗試指派車輛與執行
+            self._trigger_next_mission_unlocked()
             return True, "NA"
 
-    def _run_mission(self):
-        mission = self.active_mission
-        seq = mission.get("sequence", "UNKNOWN")
+    def _trigger_next_mission_unlocked(self):
+        # 必須在持有 self.lock 的情況下呼叫
+        while self.pending_queue and self.available_vehicles:
+            next_mission = self.pending_queue.pop(0)
+            seq = next_mission.get("sequence", "UNKNOWN")
+            vehicle_id = self.available_vehicles.pop(0)
+            
+            # 初始化該任務 Context
+            self.active_missions[seq] = {
+                "vehicle_id": vehicle_id,
+                "ack_event": threading.Event(),
+                "expected_action": None,
+                "ack_status": None
+            }
+            
+            logging.info(f"[分配車輛] 任務 {seq} 取得車輛 {vehicle_id}。剩餘可用車輛: {self.available_vehicles}")
+            
+            # 啟動狀態機執行緒
+            thread = threading.Thread(target=self._run_mission, args=(seq, next_mission), daemon=True)
+            thread.start()
+
+    def _run_mission(self, seq, mission):
         priority = mission.get("priority", "128")
         sub_missions = mission.get("sub_missions", [])
         
+        with self.lock:
+            vehicle_id = self.active_missions[seq]["vehicle_id"] if seq in self.active_missions else "UNKNOWN"
+            
         logging.info(f"==================================================")
-        logging.info(f"[狀態機啟動] 任務序號: {seq}, 共 {len(sub_missions)} 個子任務。")
+        logging.info(f"[狀態機啟動] 任務序號: {seq}, 指派車輛: {vehicle_id}, 共 {len(sub_missions)} 個子任務。")
         logging.info(f"==================================================")
         
-        for idx, sub in enumerate(sub_missions):
-            space = sub.get("space")
-            action = sub.get("action")
-            
-            # load 動作的回覆 reason 帶設定檔中的棧板 ID，其他均為 "NA"
-            reason = config.DEFAULT_PALLET_ID if action == "load" else "NA"
-            
-            # 準備任務執行結果 payload
-            result_payload = {
-                "protocol_version": "2.0",
-                "sequence": seq,
-                "timestamp": get_timestamp(),
-                "priority": priority,
-                "space": space,
-                "action": action,
-                "result": "OK",
-                "reason": reason
-            }
-            
-            # 發送執行結果至 WCS
-            url = f"{self.wcs_url}/awd/rms/set_mission_result"
-            logging.info(f"\n[任務步驟 {idx+1}/{len(sub_missions)}] 發送任務執行結果 ({action}於{space})...")
-            
-            # 設定預期要收到的 ACK 資訊
-            self.expected_sequence = seq
-            self.expected_action = action
-            self.ack_event.clear()
-            
-            # 發送 API 請求
-            send_post_request(url, result_payload)
-            
-            # 開始等待 WCS 回傳 set_mission_ack
-            logging.info(f"[任務步驟 {idx+1}/{len(sub_missions)}] 等待 WCS 發送 ACK (action='{action}')...")
-            
-            # 使用設定檔中的 ACK 等待超時
-            acked = self.ack_event.wait(timeout=config.ACK_TIMEOUT)
-            if not acked:
-                logging.error(f"[超時錯誤] 超過 {config.ACK_TIMEOUT} 秒未收到 WCS ACK (action='{action}')！任務終止。")
-                return
-            
-            if self.ack_status != "OK":
-                logging.error(f"[狀態錯誤] 收到非 OK 的 ACK 狀態: '{self.ack_status}'！任務終止。")
-                return
-            
-            logging.info(f"[步驟確認] 成功收到 WCS ACK (action='{action}')。")
-            
-            # 若不是最後一個子任務，則於收到 ACK 後，等待設定檔中的延遲秒數再發送下一個 result
-            if idx < len(sub_missions) - 1:
-                logging.info(f"[延遲等待] 依照規範，等待 {config.STEP_DELAY} 秒後再執行下一步子任務...")
-                time.sleep(config.STEP_DELAY)
+        try:
+            for idx, sub in enumerate(sub_missions):
+                space = sub.get("space")
+                action = sub.get("action")
                 
-        logging.info(f"==================================================")
-        logging.info(f"[任務完成] 任務 {seq} 搬運執行完成！")
-        logging.info(f"==================================================")
+                # load 動作的回覆 reason 帶設定檔中的棧板 ID，其他均為 "NA"
+                reason = config.DEFAULT_PALLET_ID if action == "load" else "NA"
+                
+                # 準備任務執行結果 payload
+                result_payload = {
+                    "protocol_version": "2.0",
+                    "sequence": seq,
+                    "timestamp": get_timestamp(),
+                    "priority": priority,
+                    "space": space,
+                    "action": action,
+                    "result": "OK",
+                    "reason": reason
+                }
+                
+                # 發送執行結果至 WCS
+                url = f"{self.wcs_url}/awd/rms/set_mission_result"
+                logging.info(f"\n[任務步驟 {idx+1}/{len(sub_missions)}] 任務 {seq} ({vehicle_id}) 發送任務執行結果 ({action}於{space})...")
+                
+                # 設定預期要收到的 ACK 資訊
+                with self.lock:
+                    if seq in self.active_missions:
+                        self.active_missions[seq]["expected_action"] = action
+                        self.active_missions[seq]["ack_event"].clear()
+                
+                # 發送 API 請求
+                send_post_request(url, result_payload)
+                
+                # 開始等待 WCS 回傳 set_mission_ack
+                logging.info(f"[任務步驟 {idx+1}/{len(sub_missions)}] 任務 {seq} ({vehicle_id}) 等待 WCS 發送 ACK (action='{action}')...")
+                
+                # 使用設定檔中的 ACK 等待超時
+                with self.lock:
+                    if seq not in self.active_missions:
+                        logging.error(f"任務 {seq} ({vehicle_id}) 的 Context 已遺失，終止。")
+                        return
+                    ack_event = self.active_missions[seq]["ack_event"]
+                
+                acked = ack_event.wait(timeout=config.ACK_TIMEOUT)
+                if not acked:
+                    logging.error(f"[超時錯誤] 任務 {seq} ({vehicle_id}) 超過 {config.ACK_TIMEOUT} 秒未收到 WCS ACK (action='{action}')！任務終止。")
+                    return
+                
+                with self.lock:
+                    ack_status = self.active_missions[seq]["ack_status"] if seq in self.active_missions else None
+                
+                if ack_status != "OK":
+                    logging.error(f"[狀態錯誤] 任務 {seq} ({vehicle_id}) 收到非 OK 的 ACK 狀態: '{ack_status}'！任務終止。")
+                    return
+                
+                logging.info(f"[步驟確認] 任務 {seq} ({vehicle_id}) 成功收到 WCS ACK (action='{action}')。")
+                
+                # 若不是最後一個子任務，則於收到 ACK 後，等待設定檔中的延遲秒數再發送下一個 result
+                if idx < len(sub_missions) - 1:
+                    logging.info(f"[延遲等待] 任務 {seq} ({vehicle_id}) 依照規範，等待 {config.STEP_DELAY} 秒後再執行下一步子任務...")
+                    time.sleep(config.STEP_DELAY)
+                    
+            logging.info(f"==================================================")
+            logging.info(f"[任務完成] 任務 {seq} ({vehicle_id}) 搬運執行完成！")
+            logging.info(f"==================================================")
+        finally:
+            # 確保釋放車輛資源並開啟等待佇列中的下一個任務
+            with self.lock:
+                if seq in self.active_missions:
+                    vehicle = self.active_missions[seq]["vehicle_id"]
+                    self.available_vehicles.append(vehicle)
+                    self.available_vehicles.sort()
+                    del self.active_missions[seq]
+                    logging.info(f"[資源釋放] 任務 {seq} 結束，釋放車輛 {vehicle}。目前可用車輛: {self.available_vehicles}")
+                
+                # 自動觸發下一個排隊中的任務
+                self._trigger_next_mission_unlocked()
 
     def receive_ack(self, ack_data):
         seq = ack_data.get("sequence")
         action = ack_data.get("action")
         ack = ack_data.get("ack")
         
-        # 比對是否為目前步驟正在等待的 ACK
-        if seq == self.expected_sequence and action == self.expected_action:
-            self.ack_status = ack
-            self.ack_event.set()
-            return True, "ACK matched"
-        else:
-            msg = f"未預期的 ACK 或非目前等待的步驟 (收到: seq={seq}, action={action} | 預期: seq={self.expected_sequence}, action={self.expected_action})"
-            logging.warning(msg)
-            return False, msg
+        with self.lock:
+            if seq in self.active_missions:
+                expected_action = self.active_missions[seq]["expected_action"]
+                if action == expected_action:
+                    self.active_missions[seq]["ack_status"] = ack
+                    self.active_missions[seq]["ack_event"].set()
+                    return True, "ACK matched"
+                else:
+                    msg = f"未預期的 ACK 動作 (收到: seq={seq}, action={action} | 預期: seq={seq}, action={expected_action})"
+                    logging.warning(msg)
+                    return False, msg
+            else:
+                msg = f"未預期的 ACK 任務序號或任務已結束 (收到: seq={seq}, action={action})"
+                logging.warning(msg)
+                return False, msg
 
 # 建立全域 MissionManager 實體 (預設呼叫 config.py 設定的 WCS 服務)
 WCS_BASE_URL = f"http://{config.WCS_HOST}:{config.WCS_PORT}"

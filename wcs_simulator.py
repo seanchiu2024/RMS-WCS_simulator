@@ -8,8 +8,13 @@ import urllib.error
 import threading
 import time
 import logging
+import queue
 
 import config
+
+# 全域佇列
+input_queue = queue.Queue()
+received_results_queue = queue.Queue()
 
 # 配置 Logging 同時輸出至 Console 與檔案
 log_file = config.WCS_LOG_FILE
@@ -101,12 +106,16 @@ class WCSRequestHandler(http.server.BaseHTTPRequestHandler):
         }
         self.send_json_response(200, reply_payload)
         
-        # 開啟背景執行緒，依設定時間非同步延遲後，發送 ACK 給 RMS
-        threading.Thread(
-            target=self.send_ack_to_rms,
-            args=(seq, action, priority, protocol_version),
-            daemon=True
-        ).start()
+        # 將收到結果放入 queue，待主迴圈互動確認
+        received_results_queue.put({
+            "sequence": seq,
+            "action": action,
+            "space": payload.get("space", "UNKNOWN"),
+            "result": payload.get("result", "UNKNOWN"),
+            "reason": payload.get("reason", "NA"),
+            "priority": priority,
+            "protocol_version": protocol_version
+        })
 
     def handle_online(self, payload):
         device = payload.get("device", "UNKNOWN")
@@ -118,21 +127,6 @@ class WCSRequestHandler(http.server.BaseHTTPRequestHandler):
             "message": f"成功收到 {device} 的上線狀態: {status}"
         }
         self.send_json_response(200, reply_payload)
-
-    def send_ack_to_rms(self, seq, action, priority, protocol_version):
-        logging.info(f"\n[等待延遲] 依設定於發送 ACK 前，先等待 {config.ACK_DELAY} 秒...")
-        time.sleep(config.ACK_DELAY)
-        ack_payload = {
-            "protocol_version": protocol_version,
-            "sequence": seq,
-            "timestamp": get_timestamp(),
-            "priority": priority,
-            "action": action,
-            "ack": "OK"
-        }
-        url = f"{RMS_BASE_URL}/awd/rms/set_mission_ack"
-        logging.info(f"\n[發送確認] 非同步發送 ACK (action='{action}') 給 RMS...")
-        send_post_request(url, ack_payload)
 
     def send_json_response(self, status_code, data):
         response_bytes = json.dumps(data, indent=2, ensure_ascii=False).encode('utf-8')
@@ -150,6 +144,19 @@ class WCSRequestHandler(http.server.BaseHTTPRequestHandler):
         }
         self.send_json_response(status_code, reply_payload)
 
+def send_ack_to_rms(seq, action, priority, protocol_version):
+    ack_payload = {
+        "protocol_version": protocol_version,
+        "sequence": seq,
+        "timestamp": get_timestamp(),
+        "priority": priority,
+        "action": action,
+        "ack": "OK"
+    }
+    url = f"{RMS_BASE_URL}/awd/rms/set_mission_ack"
+    logging.info(f"\n[發送確認] 發送 ACK (action='{action}') 給 RMS...")
+    send_post_request(url, ack_payload)
+
 def start_http_server(port):
     server_address = ('', port)
     httpd = http.server.ThreadingHTTPServer(server_address, WCSRequestHandler)
@@ -159,8 +166,11 @@ def start_http_server(port):
     except Exception as e:
         logging.error(f"WCS 伺服器異常終止: {e}")
 
-def trigger_test_mission(seq="M1000001"):
+def trigger_test_mission(seq=None, config_file="mission.json"):
     """發送搬運任務請求給 RMS"""
+    if not seq:
+        seq = f"M{datetime.datetime.now().strftime('%y%m%d%H%M%S')}"
+
     # 預設任務步驟 (A-01-2 ➜ L-01-0)
     sub_missions = [
         {"space": "A-01-2", "action": "start"},
@@ -170,9 +180,10 @@ def trigger_test_mission(seq="M1000001"):
     ]
     priority = "128"
     
-    # 嘗試從同目錄下的 mission.json 讀取自訂任務組合
-    config_file = "mission.json"
-    if os.path.exists(config_file):
+    if config_file:
+        if not os.path.exists(config_file):
+            logging.error(f"[錯誤] 找不到指定的任務設定檔: {config_file}！發送失敗。")
+            return
         try:
             with open(config_file, "r", encoding="utf-8") as f:
                 custom_data = json.load(f)
@@ -182,7 +193,8 @@ def trigger_test_mission(seq="M1000001"):
                 if "priority" in custom_data:
                     priority = str(custom_data["priority"])
         except Exception as e:
-            logging.error(f"讀取 {config_file} 失敗，使用預設任務。錯誤: {e}")
+            logging.error(f"讀取 {config_file} 失敗，終止發送。錯誤: {e}")
+            return
 
     mission_payload = {
       "protocol_version": "2.0",
@@ -192,8 +204,18 @@ def trigger_test_mission(seq="M1000001"):
       "sub_missions": sub_missions
     }
     url = f"{RMS_BASE_URL}/awd/rms/set_mission_request"
-    logging.info(f"\n[主動派工] 向 RMS 發送任務請求 (sequence: {seq})...")
+    logging.info(f"\n[主動派工] 向 RMS 發送任務請求 (sequence: {seq}, 檔案: {config_file})...")
     send_post_request(url, mission_payload)
+
+def input_reader():
+    while True:
+        try:
+            line = sys.stdin.readline()
+            if not line:
+                break
+            input_queue.put(line.strip())
+        except Exception:
+            break
 
 if __name__ == "__main__":
     import argparse
@@ -209,36 +231,125 @@ if __name__ == "__main__":
     server_thread = threading.Thread(target=start_http_server, args=(args.port,), daemon=True)
     server_thread.start()
     
+    # 啟動鍵盤輸入讀取執行緒
+    input_thread = threading.Thread(target=input_reader, daemon=True)
+    input_thread.start()
+    
     # 稍等一下確保伺服器印出啟動訊息
     time.sleep(0.5)
 
     print("\n" + "="*60)
     print(" 互動指令選單:")
-    print(" - 輸入 'send'  : 發送預設的 A-01-2 -> L-01-0 搬運任務 (seq: M1000001)")
-    print(" - 輸入 'send <序號>' : 發送自訂序號 the 搬運任務 (例如: send M20260619)")
+    print(" - 輸入 'send'  : 發送預設的 A-01-2 -> L-01-0 搬運任務 (seq: 自動產生，檔案: mission.json)")
+    print(" - 輸入 'send <序號>' : 發送指定序號任務 (例如: send M20260619)")
+    print(" - 輸入 'send <JSON檔名>' : 發送指定任務檔並自動產生序號 (例如: send RMS_02_mission.json)")
+    print(" - 輸入 'send <序號> <JSON檔名>' : 發送指定序號與任務檔")
     print(" - 輸入 'exit'  : 退出程式")
     print("="*60 + "\n")
 
+    pending_acks = []
+    prompt_needed = True
+    last_mode = None
+
     try:
         while True:
-            # 由於 logging 會寫入 stdout，我們使用 sys.stdout.write 與 flush 提供一個提示符
-            sys.stdout.write("WCS> ")
-            sys.stdout.flush()
-            user_input = sys.stdin.readline().strip()
+            # 處理所有新進來的 Results
+            new_results_received = False
+            while not received_results_queue.empty():
+                res = received_results_queue.get()
+                pending_acks.append(res)
+                print(f"\n[結果通知] 收到任務結果: 序號={res['sequence']}, 動作={res['action']}, 位置={res['space']}, 結果={res['result']}, 原因={res['reason']}")
+                new_results_received = True
             
-            if not user_input:
-                continue
+            if new_results_received:
+                prompt_needed = True
             
-            if user_input.lower() == 'exit':
-                logging.info("結束 WCS 模擬器。")
-                break
-            elif user_input.lower() == 'send':
-                trigger_test_mission()
-            elif user_input.lower().startswith('send '):
-                parts = user_input.split(maxsplit=1)
-                custom_seq = parts[1] if len(parts) > 1 else "M1000001"
-                trigger_test_mission(custom_seq)
+            if pending_acks:
+                res = pending_acks[0]
+                now = time.time()
+                
+                # 檢查是否已拒絕且超過 30 秒，若是則自動回覆 ACK
+                if res.get("status") == "refused" and res.get("first_refusal_time") is not None:
+                    if now - res["first_refusal_time"] >= 30.0:
+                        print(f"\n[自動確認] 任務 {res['sequence']} 動作 {res['action']} 拒絕後已超過 30 秒未確認，系統自動發送 ACK。")
+                        send_ack_to_rms(res['sequence'], res['action'], res['priority'], res['protocol_version'])
+                        pending_acks.pop(0)
+                        prompt_needed = True
+                        continue
+                
+                # 判斷是否需要提示 (若未拒絕，或已拒絕且距離上次提示已過 5 秒)
+                should_prompt = False
+                if res.get("status") != "refused":
+                    if prompt_needed or last_mode != 'ack':
+                        should_prompt = True
+                else:
+                    if now - res.get("last_prompt_time", 0) >= 5.0:
+                        should_prompt = True
+                
+                if should_prompt:
+                    sys.stdout.write(f"\n是否針對任務 {res['sequence']} 動作 {res['action']} (位置: {res['space']}) 回覆 ACK? (y/n): ")
+                    sys.stdout.flush()
+                    res["last_prompt_time"] = now
+                    prompt_needed = False
+                    last_mode = 'ack'
+                
+                try:
+                    user_input = input_queue.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+                
+                prompt_needed = True
+                
+                if user_input.lower() in ('y', 'yes'):
+                    send_ack_to_rms(res['sequence'], res['action'], res['priority'], res['protocol_version'])
+                    pending_acks.pop(0)
+                elif user_input.lower() in ('n', 'no'):
+                    logging.info(f"拒絕回覆任務 {res['sequence']} 動作 {res['action']} 的 ACK。將於 5 秒後重新詢問。")
+                    if res.get("status") != "refused":
+                        res["status"] = "refused"
+                        res["first_refusal_time"] = now
+                    res["last_prompt_time"] = now
+                else:
+                    print("請輸入 'y' 或 'n' 以確認是否回覆 ACK！")
             else:
-                print("無法辨識的指令，請輸入 'send'、'send <序號>' 或 'exit'")
+                if prompt_needed or last_mode != 'cmd':
+                    sys.stdout.write("WCS> ")
+                    sys.stdout.flush()
+                    prompt_needed = False
+                    last_mode = 'cmd'
+                
+                try:
+                    user_input = input_queue.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+                
+                prompt_needed = True
+                
+                if not user_input:
+                    continue
+                
+                if user_input.lower() == 'exit':
+                    logging.info("結束 WCS 模擬器。")
+                    break
+                elif user_input.lower() == 'send':
+                    trigger_test_mission()
+                elif user_input.lower().startswith('send '):
+                    parts = user_input.split()
+                    custom_seq = None
+                    custom_file = "mission.json"
+                    
+                    if len(parts) == 2:
+                        arg = parts[1]
+                        if arg.endswith('.json'):
+                            custom_file = arg
+                        else:
+                            custom_seq = arg
+                    elif len(parts) >= 3:
+                        custom_seq = parts[1]
+                        custom_file = parts[2]
+                        
+                    trigger_test_mission(custom_seq, custom_file)
+                else:
+                    print("無法辨識的指令，請輸入 'send'、'send <參數>' 或 'exit'")
     except KeyboardInterrupt:
         logging.info("WCS 模擬器正在關閉...")
