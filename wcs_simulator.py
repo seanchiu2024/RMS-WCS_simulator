@@ -157,6 +157,81 @@ def send_ack_to_rms(seq, action, priority, protocol_version):
     logging.info(f"\n[發送確認] 發送 ACK (action='{action}') 給 RMS...")
     send_post_request(url, ack_payload)
 
+# ==============================================================================
+# EAP Web API 交握支援元件 (Port 8000)
+# ==============================================================================
+EAP_BASE_URL = "http://localhost:8000"
+idle_counters = {}
+
+def get_idle_counter(seq):
+    """追蹤每個 sequence 已發生的 idle 動作次數"""
+    if seq not in idle_counters:
+        idle_counters[seq] = 0
+    idle_counters[seq] += 1
+    return idle_counters[seq]
+
+def call_request_enter(equipment_type, wes_id, purpose_mode):
+    url = f"{EAP_BASE_URL}/api/request-enter"
+    payload = {
+        "equipment_type": equipment_type,
+        "wes_id": wes_id,
+        "purpose_mode": purpose_mode
+    }
+    data = json.dumps(payload, indent=2, ensure_ascii=False).encode('utf-8')
+    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+    try:
+        logging.info(f"[EAP Web API] 呼叫 request-enter (設備: {equipment_type}, ID: {wes_id}, 模式: {purpose_mode})...")
+        with urllib.request.urlopen(req, timeout=30.0) as response:
+            res_body = response.read().decode('utf-8')
+            res_json = json.loads(res_body)
+            status = res_json.get("status", "WAIT")
+            logging.info(f"[EAP Web API] request-enter 回應: {status}")
+            return status
+    except Exception as e:
+        logging.error(f"[EAP Web API] request-enter 呼叫失敗: {e}")
+        return "WAIT"
+
+def call_preparation_complete(equipment_type, wes_id, purpose_mode):
+    url = f"{EAP_BASE_URL}/api/preparation-complete"
+    payload = {
+        "equipment_type": equipment_type,
+        "wes_id": wes_id,
+        "purpose_mode": purpose_mode
+    }
+    data = json.dumps(payload, indent=2, ensure_ascii=False).encode('utf-8')
+    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+    try:
+        logging.info(f"[EAP Web API] 呼叫 preparation-complete (設備: {equipment_type}, ID: {wes_id}, 模式: {purpose_mode})...")
+        with urllib.request.urlopen(req, timeout=30.0) as response:
+            res_body = response.read().decode('utf-8')
+            res_json = json.loads(res_body)
+            status = res_json.get("status", "WAIT")
+            logging.info(f"[EAP Web API] preparation-complete 回應: {status}")
+            return status
+    except Exception as e:
+        logging.error(f"[EAP Web API] preparation-complete 呼叫失敗: {e}")
+        return "WAIT"
+
+def call_result_query_takeover(equipment_type, wes_id, purpose_mode):
+    url = f"{EAP_BASE_URL}/api/result-query-takeover"
+    payload = {
+        "equipment_type": equipment_type,
+        "wes_id": wes_id,
+        "purpose_mode": purpose_mode
+    }
+    data = json.dumps(payload, indent=2, ensure_ascii=False).encode('utf-8')
+    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+    try:
+        logging.info(f"[EAP Web API] 呼叫 result-query-takeover (設備: {equipment_type}, ID: {wes_id}, 模式: {purpose_mode})...")
+        with urllib.request.urlopen(req, timeout=30.0) as response:
+            res_body = response.read().decode('utf-8')
+            res_json = json.loads(res_body)
+            logging.info(f"[EAP Web API] result-query-takeover 回應: {res_json}")
+            return res_json
+    except Exception as e:
+        logging.error(f"[EAP Web API] result-query-takeover 呼叫失敗: {e}")
+        return {"status": "error"}
+
 def start_http_server(port):
     server_address = ('', port)
     httpd = http.server.ThreadingHTTPServer(server_address, WCSRequestHandler)
@@ -223,9 +298,12 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=config.WCS_PORT, help="WCS 監聽的 Port")
     parser.add_argument("--rms-host", type=str, default=config.RMS_HOST, help="RMS 服務 Host")
     parser.add_argument("--rms-port", type=int, default=config.RMS_PORT, help="RMS 服務 Port")
+    parser.add_argument("--eap-host", type=str, default="localhost", help="EAP Web 服務 Host")
+    parser.add_argument("--eap-port", type=int, default=8000, help="EAP Web 服務 Port")
     args = parser.parse_args()
     
     RMS_BASE_URL = f"http://{args.rms_host}:{args.rms_port}"
+    EAP_BASE_URL = f"http://{args.eap_host}:{args.eap_port}"
 
     # 在背景執行緒啟動 WCS HTTP 伺服器
     server_thread = threading.Thread(target=start_http_server, args=(args.port,), daemon=True)
@@ -266,16 +344,39 @@ if __name__ == "__main__":
             
             if pending_acks:
                 res = pending_acks.pop(0)
-                print(f"\n[設備交握] 開始模擬設備交握 (Handshaking)，等待 3 秒...")
+                action = res['action']
+                seq = res['sequence']
                 
-                # =========================================================================
-                # [Handshaking 程式寫入位置]
-                # 往後若需要與實體設備進行 Handshaking (訊號交握)，請將通訊程式碼寫在此處。
-                # 例如：透過 Modbus/TCP, Socket 或其他通訊協定與硬體 PLC 進行訊號讀寫確認。
-                # =========================================================================
-                time.sleep(3)
+                if action == "idle":
+                    idle_count = get_idle_counter(seq)
+                    print(f"\n[設備交握] 偵測到 '{action}' 動作 (第 {idle_count} 個 idle)...")
+                    
+                    if idle_count == 1:
+                        # ［第 1 個 idle］：進入第一個設備申請
+                        print(f"[設備交握 #1] 向 PalletSupply 發送進入申請 (wes_id: PalletSupply#1)...")
+                        call_request_enter(equipment_type="PalletSupply", wes_id="PalletSupply#1", purpose_mode=1)
+                    elif idle_count == 2:
+                        # ［第 2 個 idle］：退出第一個設備通知與完工等待
+                        print(f"[設備交握 #2] 向 PalletSupply 發送準備完成通知，並等待完工 (wes_id: PalletSupply#1)...")
+                        call_preparation_complete(equipment_type="PalletSupply", wes_id="PalletSupply#1", purpose_mode=1)
+                        call_result_query_takeover(equipment_type="PalletSupply", wes_id="PalletSupply#1", purpose_mode=1)
+                    elif idle_count == 3:
+                        # ［第 3 個 idle］：進入第二個設備申請
+                        print(f"[設備交握 #3] 向 Station 發送進入申請 (wes_id: Robot_n)...")
+                        call_request_enter(equipment_type="Station", wes_id="Robot_n", purpose_mode=1)
+                    elif idle_count == 4:
+                        # ［第 4 個 idle］：退出第二個設備通知與完工等待
+                        print(f"[設備交握 #4] 向 Station 發送準備完成通知，並等待完工 (wes_id: Robot_n)...")
+                        call_preparation_complete(equipment_type="Station", wes_id="Robot_n", purpose_mode=1)
+                        call_result_query_takeover(equipment_type="Station", wes_id="Robot_n", purpose_mode=1)
+                    else:
+                        # 未來擴充：若有更多 idle 動作，可在此添加 elif idle_count == 5, 6 等分支
+                        print(f"[設備交握] 未知順序之 idle ({idle_count})，跳過 Web API 交握，直接通過。")
                 
-                print(f"[設備交握] 交握完成，自動回覆 ACK (OK) 給 RMS。")
+                if action == "end":
+                    # 任務結束，清理計數器避免記憶體洩漏
+                    idle_counters.pop(seq, None)
+
                 send_ack_to_rms(res['sequence'], res['action'], res['priority'], res['protocol_version'])
                 prompt_needed = True
             else:

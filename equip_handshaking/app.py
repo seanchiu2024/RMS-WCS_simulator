@@ -94,5 +94,11 @@ def api_result_query_takeover(payload: HandshakeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    # 啟動 Web Server，聆聽 port 8000
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    import argparse
+    parser = argparse.ArgumentParser(description="EAP Handshaking API Service")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="監聽 Host")
+    parser.add_argument("--port", type=int, default=8000, help="監聽 Port")
+    args = parser.parse_args()
+    
+    # 啟動 Web Server
+    uvicorn.run("app:app", host=args.host, port=args.port, reload=True)
