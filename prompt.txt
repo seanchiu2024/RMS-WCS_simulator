@@ -28,7 +28,7 @@ RMS 要可以根據 車輛 數量限制，同時執行多 requests
 
 解析並說明一下 rms_simualtor.py 程式功能及其內部資訊流，將結果寫入 rms_simulator.md
 
-解析並說明一下 wcs_simualtor.py 程式功能及其內部資訊流，將結果寫入 wcs_simulator.md
+解析並說明一下 wcs_simualtor.py 程式功能及其內部資訊流，將結果更新至 wcs_simulator.md
 
 讀取 RMS_Handshaking_spec_v1.0.md 重新產生一份 v1.1 的 spec 文件。
 
@@ -39,3 +39,15 @@ RMS 要可以根據 車輛 數量限制，同時執行多 requests
 
 
 v1.1 僅保留方案 C：特定編號硬寫死條件分支 方法就好
+
+根據根據 RMS_Handshaking_spec_v1.1.md 開發對應程式碼
+
+先不加入 HS_lookup_table 相關運作
+
+HS_lookup_table 中 的 point_id 對應 wes_id, machine_type 對應
+
+request_enter, preparatioin_complete 及 resulr_query_takeover 改呼叫對應 Web API
+
+檢查並確認所有 idle action 內都是 call Web-API 來交握
+
+更新 README.md 須說明程式運作架構及如何啟動
