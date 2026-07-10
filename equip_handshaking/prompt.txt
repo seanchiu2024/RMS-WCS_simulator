@@ -1,0 +1,12 @@
+
+建立 EAP_url_config.yaml 的class 及 method 分別依照傳入的 equipment_type 與 wes_id 提取對應的 equipment_POST_url, equipment_GET_url, sensor_POST_url以 print 顯示出來
+
+檢查一下 equipment_type 為 Aligner 修改 purpose_mode=1 是入料申請，purpose_mode=2 為出料申請，result_query_takeover 為 purpose_mode=1 的結果
+
+複製 v1.1 成為 v1.2，並在 v1.2 新增兩筆資料 equipment_type 為 Station, 設備名稱:手臂棧板位, purpose_mode=1 代表入料到位感測，purpose_mode=2 代表出料釋放資源。
+
+依 v1.2 規格更新對應的實際程式碼
+
+參考 v1.2 針對 PalletSupply 的部分，新增 op_mode 到"other args for request_enter", 主要目的是因為進入 PalletSupply 後，須設定不同設備參數。op_mode = 1 或 2 分別代表不同參數。依此原則調整相應v1.2 文件其它部分與程式碼。
+
+修改  preparation_complete function 中 sleep 時間成為 0.5 sec

@@ -265,52 +265,19 @@ if __name__ == "__main__":
                 prompt_needed = True
             
             if pending_acks:
-                res = pending_acks[0]
-                now = time.time()
+                res = pending_acks.pop(0)
+                print(f"\n[設備交握] 開始模擬設備交握 (Handshaking)，等待 3 秒...")
                 
-                # 檢查是否已拒絕且超過 30 秒，若是則自動回覆 ACK
-                if res.get("status") == "refused" and res.get("first_refusal_time") is not None:
-                    if now - res["first_refusal_time"] >= 30.0:
-                        print(f"\n[自動確認] 任務 {res['sequence']} 動作 {res['action']} 拒絕後已超過 30 秒未確認，系統自動發送 ACK。")
-                        send_ack_to_rms(res['sequence'], res['action'], res['priority'], res['protocol_version'])
-                        pending_acks.pop(0)
-                        prompt_needed = True
-                        continue
+                # =========================================================================
+                # [Handshaking 程式寫入位置]
+                # 往後若需要與實體設備進行 Handshaking (訊號交握)，請將通訊程式碼寫在此處。
+                # 例如：透過 Modbus/TCP, Socket 或其他通訊協定與硬體 PLC 進行訊號讀寫確認。
+                # =========================================================================
+                time.sleep(3)
                 
-                # 判斷是否需要提示 (若未拒絕，或已拒絕且距離上次提示已過 5 秒)
-                should_prompt = False
-                if res.get("status") != "refused":
-                    if prompt_needed or last_mode != 'ack':
-                        should_prompt = True
-                else:
-                    if now - res.get("last_prompt_time", 0) >= 5.0:
-                        should_prompt = True
-                
-                if should_prompt:
-                    sys.stdout.write(f"\n是否針對任務 {res['sequence']} 動作 {res['action']} (位置: {res['space']}) 回覆 ACK? (y/n): ")
-                    sys.stdout.flush()
-                    res["last_prompt_time"] = now
-                    prompt_needed = False
-                    last_mode = 'ack'
-                
-                try:
-                    user_input = input_queue.get(timeout=0.5)
-                except queue.Empty:
-                    continue
-                
+                print(f"[設備交握] 交握完成，自動回覆 ACK (OK) 給 RMS。")
+                send_ack_to_rms(res['sequence'], res['action'], res['priority'], res['protocol_version'])
                 prompt_needed = True
-                
-                if user_input.lower() in ('y', 'yes'):
-                    send_ack_to_rms(res['sequence'], res['action'], res['priority'], res['protocol_version'])
-                    pending_acks.pop(0)
-                elif user_input.lower() in ('n', 'no'):
-                    logging.info(f"拒絕回覆任務 {res['sequence']} 動作 {res['action']} 的 ACK。將於 5 秒後重新詢問。")
-                    if res.get("status") != "refused":
-                        res["status"] = "refused"
-                        res["first_refusal_time"] = now
-                    res["last_prompt_time"] = now
-                else:
-                    print("請輸入 'y' 或 'n' 以確認是否回覆 ACK！")
             else:
                 if prompt_needed or last_mode != 'cmd':
                     sys.stdout.write("WCS> ")

@@ -17,3 +17,25 @@ WCS 可支援多指令下發， 多result 回收，並根據 resuslt 回復狀�
 RMS 要可以根據 車輛 數量限制，同時執行多 requests
 將可用 車輛 數量設為 2 台
 當 mission 結束後, 釋放相應 resources.
+
+----------------
+
+修改 WCS simulator程式，將原先需等待使用者回復 yes/no 才 send ack ok 的部分，先更改為 sleep(3) 做就回復 ack ok
+同時 在 sleep(3) 加上 comment, 說明往後 handshaking 的程式寫入位置。
+---------------------
+
+更新一下 README.md  的內容
+
+解析並說明一下 rms_simualtor.py 程式功能及其內部資訊流，將結果寫入 rms_simulator.md
+
+解析並說明一下 wcs_simualtor.py 程式功能及其內部資訊流，將結果寫入 wcs_simulator.md
+
+讀取 RMS_Handshaking_spec_v1.0.md 重新產生一份 v1.1 的 spec 文件。
+
+
+由於 submissions 中 idle 可能有 2,4,6,8,10 等偶數個，
+未來針對不同 數量的 idle，要加入對應的交握程式，需要如何更改程式。
+調整規格 v1.1 內容 加上註解及說明.  
+
+
+v1.1 僅保留方案 C：特定編號硬寫死條件分支 方法就好

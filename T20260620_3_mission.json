@@ -12,8 +12,3 @@
     { "space": "L-01-0", "action": "end"}
     ]
 }
-
-page 5-7 確認欄位名稱是否有 verify_, 另外補充說明 如何讓 pallet1_Count 有變化
-page 11 -12 PPT 與 Excel 說明不一致，請更新 Page 11 說明
-p14 到位感測 測試失敗
-以上請協助修正，並將測試紀錄 加入此份 PPT 再再回傳
