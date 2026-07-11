@@ -1,0 +1,46 @@
+point_id,wait_point_id,equipment_type,need_HS,note,location
+IPT_101,IPTW101,ASRS_IPORT,yes,ASRS ?�口,1F
+OPT_101,OPTW101,ASRS_OPORT,yes,ASRS ?�口,1F
+IPT_102,IPTW102,ASRS_IPORT,yes,ASRS ?�口,1F
+OPT_102,OPTW102,ASRS_OPORT,yes,ASRS ?�口,1F
+IPT_103,IPTW103,ASRS_IPORT,yes,ASRS ?�口,1F
+OPT_103,OPTW103,ASRS_OPORT,yes,ASRS ?�口,1F
+IPT_104,IPTW104,ASRS_IPORT,yes,ASRS ?�口,1F
+OPT_104,OPTW104,ASRS_OPORT,yes,ASRS ?�口,1F
+IPT_105,IPTW105,ASRS_IPORT,yes,ASRS ?�口,1F
+OPT_105,OPTW105,ASRS_OPORT,yes,ASRS ?�口,1F
+IPT_106,IPTW106,ASRS_IPORT,yes,ASRS ?�口,1F
+OPT_106,OPTW106,ASRS_OPORT,yes,ASRS ?�口,1F
+IPT_107,IPTW107,ASRS_IPORT,yes,ASRS ?�口,1F
+OPT_107,OPTW107,ASRS_OPORT,yes,ASRS ?�口,1F
+RPL_101,RPLW101,PalletSupply,yes,棧板供收�?1F,
+ALN_101,ALNW101,Aligner,yes,?�板�?1F,
+RPL_501,RPLW501,PalletSupply,yes,棧板供收�?5F,
+RPL_502,RPLW502,PalletSupply,yes,棧板供收�?5F,
+LFT_101,LFTW101,LIFT,yes,?��?�?1F,
+LFT_102,LFTW102,LIFT,yes,?��?�?1F,
+LFT_103,LFTW103,LIFT,yes,?��?�?1F,
+LFT_104,LFTW104,LIFT,yes,?��?�?1F,
+LFT_501,LFTW501,LIFT,yes,?��?�?5F,
+LFT_502,LFTW502,LIFT,yes,?��?�?5F,
+WRP_501,WRPW501,Wrap,yes,?��?�?5F,
+WRP_502,WRPW502,Wrap,yes,?��?�?5F,
+CHK_501,CHKW501,Check,yes,外�?檢測�?5F,
+R01_5P1,R01W5P1,Station,yes,?��?棧板�?5F,
+R01_5P2,R01W5P2,Station,yes,?��?棧板�?5F,
+R01_5P3,R01W5P3,Station,yes,?��?棧板�?5F,
+R01_5P4,R01W5P4,Station,yes,?��?棧板�?5F,
+R02_5P1,R02W5P1,Station,yes,?��?棧板�?5F,
+R02_5P2,R02W5P2,Station,yes,?��?棧板�?5F,
+R02_5P3,R02W5P3,Station,yes,?��?棧板�?5F,
+R02_5P4,R02W5P4,Station,yes,?��?棧板�?5F,
+R03_5P1,R03W5P1,Station,yes,?��?棧板�?5F,
+R03_5P2,R03W5P2,Station,yes,?��?棧板�?5F,
+R03_5P3,R03W5P3,Station,yes,?��?棧板�?5F,
+R03_5P4,R03W5P4,Station,yes,?��?棧板�?5F,
+R04_5P1,R04W5P1,Station,yes,?��?棧板�?5F,
+R04_5P2,R04W5P2,Station,yes,?��?棧板�?5F,
+R04_5P3,R04W5P3,Station,yes,?��?棧板�?5F,
+R04_5P4,R04W5P4,Station,yes,?��?棧板�?5F,
+Repeat-B-0,Repeat-A-0,Station,yes,5F,
+Repeat-C-0,L-01-0,Aligner,yes,,5F,

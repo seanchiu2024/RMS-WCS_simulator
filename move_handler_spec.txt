@@ -1,0 +1,22 @@
+
+目的: 
+  開發一個 move.py 程式
+  
+輸入:
+  Action_type, sourcepoint, targetpoint
+  
+程式邏輯:
+  1. 呼叫 generate_missiion 的function call, 產生給 RMS 的 missions.
+  2. equipment_type = 對應 "space" 點位中, 查找 hs_lookup_table 中取得
+     purpose_mode 在第一次交握時，如為 sourcepoint_W 先設為 2, 如為 targetpint_W 時先設定位 1
+  3. 參考 wcs_simulator 的運作邏輯 及 RMS_Handshaking_spec_v1.1.md，在每個 idle action 中加入 交握程式。 後才回復 ack ok
+
+輸出:
+  跟 WCS_simulator 相同，在 move.py 加入測試程式
+  各重要節點 如 result/ack 需有 log 紀錄
+  Action_type="MOVE"
+  測試 4 種情境，即 sourcepoint and targetpoint 分別有/無 waiting point 狀況
+
+  
+
+加強 move 程式 使其可接收 sourcepoint and targetpoint 兩個 args    
